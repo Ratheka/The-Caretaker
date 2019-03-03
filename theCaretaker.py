@@ -63,23 +63,32 @@ def is_invocation(message):
         ACTIVE_PERSONALITY.lower()), 'listen up, motherfucker', 'front!']
     attention_re = re.compile("|".join(attention_grabbers))
     if attention_re.search(message.content.lower()):
-        return True
-    return False
+        invocation_str = message.content.lower()
+        basic_grabber = attention_grabbers[0]
+        for grabber in attention_grabbers:
+            invocation_str = invocation_str.replace(grabber, basic_grabber)
+        return (True, invocation_str)
+    return (False, message.content)
  
 def find_command(command_dict_list, message_dict):
     command_list = []
+    alias_dict = {}
     for command in command_dict_list:
         command_list.append(command['trigger'])
         for entry in command['aliases']:
             command_list.append(entry)
+            alias_dict[entry] = command['trigger']
     command_re = re.compile("|".join(command_list))
     re_search = command_re.search(message_dict['message'].content.lower())
     if re_search:
         message_dict['orders'] = (
-            message_dict['message'].content.lower()[re_search.span[0]:])
-        message_dict['invocation'] = (
-            message_dict['message'].content.lower()[re_search.span[0]:(
-            re.search.span[1])])
+            message_dict['message'].content.lower()[re_search.start:])
+        for alias in alias_dict.keys():
+            if alias in message_dict['orders']:
+                message_dict['orders'].replace(alias, alias_dict[alias])
+                message_dict['invocation'] = alias_dict[alias]
+            if not hasattr(message_dict['invocation']):
+                message_dict['invocation'] = re_search.group()
         
     else:
         message_dict['orders'] = None
@@ -565,12 +574,15 @@ async def on_message(message):
         pass
     else:
         handle = get_handle(message.author)
-        if is_invocation(message):
+        invoke_check = is_invocation(message)
+        
+        if invoke_check[0]:
             ENGAGED_COMMANDERS[handle] = 0
         
         if handle in ENGAGED_COMMANDERS.keys():
             message_dict = {'handle': handle,
-                            'message': message}
+                            'message': message,
+                            'message text': invoke_check[1]}
             await active_ear.command_handler(message_dict)
             
 #    client.process_commands(message)  I don't think this is necessary
