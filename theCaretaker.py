@@ -45,16 +45,15 @@ class ActiveListener:
         message_dict = clean_argumaker(message_dict)
         write_log(message_dict)
         invocation = message_dict['invocation']
-        self.commands[invocation](
+        command = list(filter(lambda c: c['trigger'] == invocation or invocation in c['aliases'], self.commands))[0]
+        await command['function'](
             message_dict['message'], self.client, message_dict['args'])
-        
-
 
     
 active_ear = ActiveListener(client)
 
 def get_handle(member):
-    if hasattr(member.nick):
+    if hasattr(member, 'nick'):
         return member.nick
     return member.name
 
@@ -82,12 +81,12 @@ def find_command(command_dict_list, message_dict):
     re_search = command_re.search(message_dict['message'].content.lower())
     if re_search:
         message_dict['orders'] = (
-            message_dict['message'].content.lower()[re_search.start:])
+            message_dict['message'].content.lower()[re_search.start():])
         for alias in alias_dict.keys():
             if alias in message_dict['orders']:
                 message_dict['orders'].replace(alias, alias_dict[alias])
                 message_dict['invocation'] = alias_dict[alias]
-            if not hasattr(message_dict['invocation']):
+            if 'invocation' not in message_dict:
                 message_dict['invocation'] = re_search.group()
         
     else:
