@@ -37,17 +37,24 @@ class ActiveListener:
 
     async def command_handler(self, message_dict):
         global ENGAGED_COMMANDERS
+        handle = get_handle(message_dict['message'].author)
         message_dict = find_command(self.commands, message_dict)
         if message_dict['orders'] == None:
+            await failed_command(message_dict, client)
+            
+            if ENGAGED_COMMANDERS[handle] >= 4:
+                del ENGAGED_COMMANDERS[handle]
             return
         
         message_dict = message_breakdown(message_dict)
         message_dict = clean_argumaker(message_dict)
         write_log(message_dict)
         invocation = message_dict['invocation']
-        command = list(filter(lambda c: c['trigger'] == invocation or invocation in c['aliases'], self.commands))[0]
+        command = list(filter(lambda c: c['trigger'] == (invocation or 
+            invocation in c['aliases']), self.commands))[0]
         await command['function'](
             message_dict['message'], self.client, message_dict['args'])
+        del ENGAGED_COMMANDERS[message_dict['handle']]
 
     
 active_ear = ActiveListener(client)
@@ -145,13 +152,17 @@ async def tell_function(message, client, args):
     if send_message == []:
         send_message = await compose_cheer(message, args)
 
-    for line in send_message:
-        if line == '':
-            await asyncio.sleep(3)
-        elif line != None:
-            await client.send_typing(target_channel)
-            await asyncio.sleep(3)
-            await client.send_message(target_channel, line)
+    if type(send_message) == type(' '): #Surely I can do better than this.
+        await client.send_message(target_channel, send_message)
+    
+    else:    
+        for line in send_message:
+            if line == '':
+                await asyncio.sleep(3)
+            elif line != None:
+                await client.send_typing(target_channel)
+                await asyncio.sleep(3)
+                await client.send_message(target_channel, line)
             
     if args[0].lower() in 'bloodrose' and 'blood' in send_message[0].lower():
         await client.send_typing(message.channel)
@@ -197,6 +208,24 @@ def target_get(message, target):
     else: target_channel = ['Something has gone terribly wrong.']
                     
     return target_channel
+
+async def failed_command(message_dict, client):
+    fail_message = ("I'm sorry, but " + message_dict['message text'] + 
+                    " doesn't appear to be something I know how to do. I'm " +
+                    "sure a clever sapient like you will be able to overcome" +
+                    " the sound of all of that blood sloshing around inside " +
+                    "of you and come up with a proper command, if you really" +
+                    " exert yourself to the utmost.")
+    first_response = ("Yes, " + message_dict['message'].author.mention + ", " +
+                    "what service can this humble virtual construct perform " +
+                    "for you?")
+    if ENGAGED_COMMANDERS[message_dict['handle']] > 1:    
+        await client.send_message(message_dict['message'].channel, 
+                                  fail_message)
+    else:
+        await client.send_message(message_dict['message'].channel, 
+                                  first_response)
+    return
 
 async def compose_cheer(message, args):
     cheer = []
@@ -579,6 +608,7 @@ async def on_message(message):
             ENGAGED_COMMANDERS[handle] = 0
         
         if handle in ENGAGED_COMMANDERS.keys():
+            ENGAGED_COMMANDERS[handle] += 1
             message_dict = {'handle': handle,
                             'message': message,
                             'message text': invoke_check[1]}
