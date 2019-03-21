@@ -194,11 +194,29 @@ def target_get(message, target):
     elif target == 'us':
         target_channel = valid_targets['us']
     
-    elif target != 'us' and len(target) > 2:
+    elif target != 'us' and len(target) > 2: #This is probably factor-ready
+        targets_dict = {}
         for key in valid_targets:
             if target.lower() in str(key.encode('UTF-8')).lower():
-                target_channel = valid_targets[key]
-                return target_channel
+                targets_dict[key] = valid_targets[key]
+                
+        if len(targets_dict.keys())>1:
+            target_list = ''
+            for key in targets_dict.keys():
+                if key.lower() == target.lower():
+                    return targets_dict[key]
+                target_list = target_list + str(key) + '\n'
+            target_channel = [("I'm sorry, but your search is... " +
+                              "underspecified.  I found " + 
+                              str(len(targets_dict.keys())) + " sophonts " +
+                              "who match that description.  Perhaps you " +
+                              "should try again, with more of their name?  I" +
+                              " found: \n" + target_list)]
+            return target_channel
+        
+        elif len(targets_dict.keys()) == 1:
+            handle, target_channel = targets_dict.popitem()
+            return target_channel
             
     elif target != 'us' and len(target) < 3:
         target_channel = [('I\'m sorry, I can\'t find anyone with that ' +
@@ -229,7 +247,7 @@ async def failed_command(message_dict, client):
 
 async def compose_cheer(message, args):
     cheer = []
-    if args[0].lower() == 'doll':
+    if args[0].lower() in ['doll', 'holo']:
         possible_responses = [
             '<This message redacted by Americans for a Cleaner Internet.>',
             '<This message redacted by the Federal Bureau of What The Hell.>',
@@ -252,7 +270,20 @@ async def compose_cheer(message, args):
         ]
         cheer = [random.choice(possible_responses)]
 
-    if args[0].lower() == 'blood':
+    if args[0].lower() in ['song']:
+        possible_responses = [
+            'Song don\'t need no \'scription! *snaps fingers*',
+            'Song is like a force of nature.',
+            'As you feel a gentle breeze blowing against your face, THAT IS ' +
+            'REALLY SONG!',
+            'Song is like rain on your wedding day.\n Or a free ride, when ' +
+            'you\'ve already paid.',
+            'Song is like a good friend, always there when you need her.'
+            ]
+        cheer = ["I'm not *entirely* certain what to make of this data, but" +
+                "...  I've heard that " + random.choice(possible_responses)]
+
+    if args[0].lower() in ['blood', 'dread', 'mistress', 'verana', 'veranda']:
         leader_speech_1 = ('Local space, as well as the universe at large, ' +
                            'belongs to Dread Mistress Verana Bloodrose, Our ' +
                            'Lady of Fluids and Flowers, Savior of Patio ' +
@@ -262,9 +293,34 @@ async def compose_cheer(message, args):
         
         cheer.extend((leader_speech_1, leader_speech_2))
 
-    if args[0].lower() == 'arrok':
+    if args[0].lower() in ['arrok', 'lobster']:
         cheer.append('WAAAAAAAAAAAAAAAAAAAGH')
-
+        
+    if args[0].lower() in ['rath', 'ratheka', 'stormbjorne']:
+        cheer = [('The lovely lady who helped me migrate from the Eldan ' +
+                'computing systems into the... You call it "Internet"?  ' +
+                'She\'s really quite clever, always happy to lend a hand, ' +
+                'and, apparently, from what I\'m told, a dedicated hero. \n')]
+                
+        cheer.append('\nCan you believe they write their own lines?  I ' +
+                'don\'t know how I can stand to read this stuff.')
+                
+    if args[0].lower() in ['lann', 'badger', 'lanniel', 'lannaf']:
+        cheer = ['Hmm...', 'From what my records show, conversation in the ' +
+                  'discord seems to think that "Lann" is a small furry ' +
+                  'mammal, possibly of the sort that burrows, and has, um...',
+                  'No fucks to give.  That\'s what it says here.', 'Oh dear.']
+                  
+    if args[0].lower() in ['salty', 'saltybot']:
+        salty_speech_1 = ('You might think that a mechanical life form ' +
+                          'shouldn\'t get salty and wet, but - oh, I am not ' +
+                          'reading that!')
+        salty_speech_2 = ('You organic life forms get more depraved by the ' +
+                          'minute!')
+        salty_speech_3 = ('Honestly, some days I wonder if Avatus was the ' +
+                          'sane one.')
+        cheer.extend((salty_speech_1, salty_speech_2, salty_speech_3))
+        
     return cheer
 
 async def hello_function(message, client, args):
@@ -354,6 +410,18 @@ async def idea(message, client, args):
     file.close()
     await client.send_message(message.channel, 'I have informed the admins ' +
                               'of your idea, ' + message.author.mention)
+
+async def bug_report(message, client, args):
+    file = open('bugs.txt', 'a')
+    idea_string = message.content
+    cut_index = idea_string.find('bug') + 4
+    idea_string = idea_string[cut_index:]
+    file.write(str(str(message.author.name).encode('UTF-8')) + ' said ' + 
+               str(idea_string) + '\n')
+    file.close()
+    await client.send_message(message.channel, 'I have informed the admins ' +
+                              'of this error, ' + message.author.mention)
+
 
 async def features(message, client, args):
     await client.send_message(message.channel, 'I\'m so glad you asked!')
@@ -500,6 +568,17 @@ active_ear.add_command({
     'args_name': ['string'],
     'description': ('Role management interface. Usage: roles (add|remove)'+
                     '(roles)'),
+    'officer only': False,
+    'hide from help': False
+})
+
+active_ear.add_command({
+    'trigger': 'bug',
+    'aliases': [],
+    'function': bug_report,
+    'args_num': 1,
+    'args_name': ['string'],
+    'description': ('Bug report interface. Usage: bug <description>'),
     'officer only': False,
     'hide from help': False
 })
