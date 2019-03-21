@@ -2,10 +2,9 @@
 #
 #  theCaretaker.py - Discord bot for The Final Frontier
 import random
-import time
+#import time
 import asyncio
 import discord
-import os
 import re
 
 from discord import Game
@@ -17,11 +16,8 @@ BOT_PREFIX = (';', '!')
 PERSONALITIES = ['Caretaker', 'Avatus']
 ACTIVE_PERSONALITY = PERSONALITIES[0]
 client = Bot(command_prefix=BOT_PREFIX)
-COMMAND_MODE = False
 ENGAGED_COMMANDERS = {}
-NONMEMBERS_LIST = []
 #client.remove_command('help')
-
 
 class ActiveListener:
 
@@ -39,137 +35,98 @@ class ActiveListener:
         if command['officer only'] == True:
             self.ohelplist.append(command)
 
-    async def command_handler(self, message):
-        global COMMAND_MODE
+    async def command_handler(self, message_dict):
         global ENGAGED_COMMANDERS
-        global NONMEMBERS_LIST
-        handle = None
-        if message.author.nick:
-            handle = message.author.nick
-        if handle == None:
-            handle = message.author.name
-        handle = str(handle)    
-        if len(ENGAGED_COMMANDERS) == 0:
-            COMMAND_MODE = False
-        if ("hey " + ACTIVE_PERSONALITY).lower() in message.content.lower():
-            COMMAND_MODE = True
+        handle = get_handle(message_dict['message'].author)
+        message_dict = find_command(self.commands, message_dict)
+        if message_dict['orders'] == None:
+            await failed_command(message_dict, client)
             
-            ENGAGED_COMMANDERS[handle] = 0
-            args = message_breakdown(message)
-            args = clean_argumaker(args)
-            
-            for command in self.commands: #redo this w/ sets and intersections?
-                if command['trigger'].lower() in args:
-                    with open('./invokers.txt', 'a') as log:
-                        auth_name = str(message.author.name)
-                        auth_discr = str(message.author.discriminator)
-                        order_trigg = str(command['trigger'])
-                        log_message = ('I heard a command!  ' + auth_name + 
-                                       '#' + auth_discr + ' told me to ' +
-                                       order_trigg + ' by saying, "' + 
-                                       str(message.content) + '".\n')
-                        log.write(log_message)
-                    
-                    if len(args) >= command['args_num']:
-                        if command != None:
-                            await command['function'](message, self.client, 
-                                                      args)
-                            if handle in ENGAGED_COMMANDERS.keys():
-                                del ENGAGED_COMMANDERS[handle]
-                        return
-                    
-                    else:
-                        fail_message = ('Command "{}" requires {} arguments ' +
-                                        'of type {}'.format(command['trigger'],
-                                        command['args_num'], 
-                                        ', '.join(command['args_name'])))
-
-                        return await self.client.send_message(message.channel, 
-                                                              fail_message)
-                    
-            helpful_message = ('Yes, ' + message.author.mention + '?  How ' +
-                               'can I assist?')
-            print('I heard my name called!  ' + str(message.author.name) + 
-            '#' + str(message.author.discriminator) + ' called me, saying ' + 
-            str(message.content) + '".')
-
-            return await client.send_message(message.channel, helpful_message)
-                
-        elif (COMMAND_MODE == True ) and (handle in 
-                                        ENGAGED_COMMANDERS.keys()) == True:
-            args = message_breakdown(message)
-            args = clean_argumaker(args)
-                                   
-            for command in self.commands:
-                if command['trigger'].lower() in args:
-                    
-                    with open('./invokers.txt', 'a') as log:
-                        auth_name = str(message.author.name)
-                        auth_discr = str(message.author.discriminator)
-                        order_trigg = str(command['trigger'])
-                        log_message = ('I heard a command!  ' + auth_name + 
-                                       '#' + auth_discr + ' told me to ' +
-                                       order_trigg + ' by saying, "' + 
-                                       str(message.content) + '".\n')
-                        log.write(log_message)
-                        
-                    if len(args) >= command['args_num']:
-                        await command['function'](message, self.client, args)
-                        if handle in ENGAGED_COMMANDERS:
-                                del ENGAGED_COMMANDERS[handle]
-                        return
-                    
-                    else:
-                        fail_message = ('Command "{}" requires {} arguments ' +
-                                        'of type {}').format(
-                                        command['trigger'], 
-                                        command['args_num'], ', '.join(
-                                        command['args_name']))
-                        
-                        return self.client.send_message(message.channel, 
-                                                        fail_message)
-                
-            fail_message = (
-                'I\'m sorry, that doesn\'t seem to be something I know how ' +
-                'to do right now.')
-            if handle in ENGAGED_COMMANDERS.keys():
-                ENGAGED_COMMANDERS[handle] = ENGAGED_COMMANDERS[handle] + 1
-            if ENGAGED_COMMANDERS[handle] > 2:
-                fail_message = (fail_message + '\nAdditionally, I\'m going ' +
-                                'to pay attention to other things while you ' +
-                                'work out what it was you meant to say.')
+            if ENGAGED_COMMANDERS[handle] >= 4:
                 del ENGAGED_COMMANDERS[handle]
-                
-            return await client.send_message(message.channel, fail_message)
+            return
         
-        elif message.author in NONMEMBERS_LIST:
-            if 'i agree' in message.content.lower():
-                args = message_breakdown(message)
-                args = clean_argumaker(args)
-                agree(message, self.client, args)
-        
-
+        message_dict = message_breakdown(message_dict)
+        message_dict = clean_argumaker(message_dict)
+        write_log(message_dict)
+        invocation = message_dict['invocation']
+        command = list(filter(lambda c: c['trigger'] == (invocation or 
+            invocation in c['aliases']), self.commands))[0]
+        await command['function'](
+            message_dict['message'], self.client, message_dict['args'])
+        del ENGAGED_COMMANDERS[message_dict['handle']]
 
     
 active_ear = ActiveListener(client)
 
-def message_breakdown(message):
-    message_str = message.content.lower()
+def get_handle(member):
+    if hasattr(member, 'nick'):
+        return member.nick
+    return member.name
+
+def is_invocation(message):
+    attention_grabbers = [('hey ' + ACTIVE_PERSONALITY.lower()), ('yo ' + 
+        ACTIVE_PERSONALITY.lower()), 'listen up, motherfucker', 'front!']
+    attention_re = re.compile("|".join(attention_grabbers))
+    if attention_re.search(message.content.lower()):
+        invocation_str = message.content.lower()
+        basic_grabber = attention_grabbers[0]
+        for grabber in attention_grabbers:
+            invocation_str = invocation_str.replace(grabber, basic_grabber)
+        return (True, invocation_str)
+    return (False, message.content)
+ 
+def find_command(command_dict_list, message_dict):
+    command_list = []
+    alias_dict = {}
+    for command in command_dict_list:
+        command_list.append(command['trigger'])
+        for entry in command['aliases']:
+            command_list.append(entry)
+            alias_dict[entry] = command['trigger']
+    command_re = re.compile("|".join(command_list))
+    re_search = command_re.search(message_dict['message'].content.lower())
+    if re_search:
+        message_dict['orders'] = (
+            message_dict['message'].content.lower()[re_search.start():])
+        for alias in alias_dict.keys():
+            if alias in message_dict['orders']:
+                message_dict['orders'].replace(alias, alias_dict[alias])
+                message_dict['invocation'] = alias_dict[alias]
+            if 'invocation' not in message_dict:
+                message_dict['invocation'] = re_search.group()
+        
+    else:
+        message_dict['orders'] = None
+    return message_dict
+ 
+def message_breakdown(message_dict):
+    message_str = message_dict['message'].content.lower()
     message_str.replace(', ', ' ')
     message_str.replace('. ', ' ')
     message_str.replace('; ', ' ')
     message_str.replace('! ', ' ')
     message_str.replace('? ', ' ')
-    args = re.split(' +', message_str)
-    return args
+    message_dict['args'] = re.split(' +', message_str)
+    return message_dict
 
-def clean_argumaker(args):
+def clean_argumaker(message_dict):
 
-    if ACTIVE_PERSONALITY.lower() in args:
-        args.remove(ACTIVE_PERSONALITY.lower())
-    if 'hey' in args:
-        args.remove('hey')
-    return args
+    if ACTIVE_PERSONALITY.lower() in message_dict['args']:
+        message_dict['args'].remove(ACTIVE_PERSONALITY.lower())
+    if 'hey' in message_dict['args']:
+        message_dict['args'].remove('hey')
+    return message_dict
+    
+def write_log(message_dict):
+    with open('./invokers.txt', 'a') as log:
+        auth_name = str(message_dict['message'].author.name)
+        auth_discr = str(message_dict['message'].author.discriminator)
+        log_message = ('I heard a command!  ' + auth_name + '#' + auth_discr +
+        ' told me to ' + message_dict['orders'] + ' by saying, "' + 
+        str(message_dict['message'].content) + '".\n')
+        log.write(log_message)
+    return
 
 async def tell_function(message, client, args):
     target = args[args.index('tell')+1]
@@ -195,13 +152,17 @@ async def tell_function(message, client, args):
     if send_message == []:
         send_message = await compose_cheer(message, args)
 
-    for line in send_message:
-        if line == '':
-            await asyncio.sleep(3)
-        elif line != None:
-            await client.send_typing(target_channel)
-            await asyncio.sleep(3)
-            await client.send_message(target_channel, line)
+    if type(send_message) == type(' '): #Surely I can do better than this.
+        await client.send_message(target_channel, send_message)
+    
+    else:    
+        for line in send_message:
+            if line == '':
+                await asyncio.sleep(3)
+            elif line != None:
+                await client.send_typing(target_channel)
+                await asyncio.sleep(3)
+                await client.send_message(target_channel, line)
             
     if args[0].lower() in 'bloodrose' and 'blood' in send_message[0].lower():
         await client.send_typing(message.channel)
@@ -233,11 +194,29 @@ def target_get(message, target):
     elif target == 'us':
         target_channel = valid_targets['us']
     
-    elif target != 'us' and len(target) > 2:
+    elif target != 'us' and len(target) > 2: #This is probably factor-ready
+        targets_dict = {}
         for key in valid_targets:
             if target.lower() in str(key.encode('UTF-8')).lower():
-                target_channel = valid_targets[key]
-                return target_channel
+                targets_dict[key] = valid_targets[key]
+                
+        if len(targets_dict.keys())>1:
+            target_list = ''
+            for key in targets_dict.keys():
+                if key.lower() == target.lower():
+                    return targets_dict[key]
+                target_list = target_list + str(key) + '\n'
+            target_channel = [("I'm sorry, but your search is... " +
+                              "underspecified.  I found " + 
+                              str(len(targets_dict.keys())) + " sophonts " +
+                              "who match that description.  Perhaps you " +
+                              "should try again, with more of their name?  I" +
+                              " found: \n" + target_list)]
+            return target_channel
+        
+        elif len(targets_dict.keys()) == 1:
+            handle, target_channel = targets_dict.popitem()
+            return target_channel
             
     elif target != 'us' and len(target) < 3:
         target_channel = [('I\'m sorry, I can\'t find anyone with that ' +
@@ -248,9 +227,27 @@ def target_get(message, target):
                     
     return target_channel
 
+async def failed_command(message_dict, client):
+    fail_message = ("I'm sorry, but " + message_dict['message text'] + 
+                    " doesn't appear to be something I know how to do. I'm " +
+                    "sure a clever sapient like you will be able to overcome" +
+                    " the sound of all of that blood sloshing around inside " +
+                    "of you and come up with a proper command, if you really" +
+                    " exert yourself to the utmost.")
+    first_response = ("Yes, " + message_dict['message'].author.mention + ", " +
+                    "what service can this humble virtual construct perform " +
+                    "for you?")
+    if ENGAGED_COMMANDERS[message_dict['handle']] > 1:    
+        await client.send_message(message_dict['message'].channel, 
+                                  fail_message)
+    else:
+        await client.send_message(message_dict['message'].channel, 
+                                  first_response)
+    return
+
 async def compose_cheer(message, args):
     cheer = []
-    if args[0].lower() == 'doll':
+    if args[0].lower() in ['doll', 'holo']:
         possible_responses = [
             '<This message redacted by Americans for a Cleaner Internet.>',
             '<This message redacted by the Federal Bureau of What The Hell.>',
@@ -273,7 +270,20 @@ async def compose_cheer(message, args):
         ]
         cheer = [random.choice(possible_responses)]
 
-    if args[0].lower() == 'blood':
+    if args[0].lower() in ['song']:
+        possible_responses = [
+            'Song don\'t need no \'scription! *snaps fingers*',
+            'Song is like a force of nature.',
+            'As you feel a gentle breeze blowing against your face, THAT IS ' +
+            'REALLY SONG!',
+            'Song is like rain on your wedding day.\n Or a free ride, when ' +
+            'you\'ve already paid.',
+            'Song is like a good friend, always there when you need her.'
+            ]
+        cheer = ["I'm not *entirely* certain what to make of this data, but" +
+                "...  I've heard that " + random.choice(possible_responses)]
+
+    if args[0].lower() in ['blood', 'dread', 'mistress', 'verana', 'veranda']:
         leader_speech_1 = ('Local space, as well as the universe at large, ' +
                            'belongs to Dread Mistress Verana Bloodrose, Our ' +
                            'Lady of Fluids and Flowers, Savior of Patio ' +
@@ -283,9 +293,34 @@ async def compose_cheer(message, args):
         
         cheer.extend((leader_speech_1, leader_speech_2))
 
-    if args[0].lower() == 'arrok':
+    if args[0].lower() in ['arrok', 'lobster']:
         cheer.append('WAAAAAAAAAAAAAAAAAAAGH')
-
+        
+    if args[0].lower() in ['rath', 'ratheka', 'stormbjorne']:
+        cheer = [('The lovely lady who helped me migrate from the Eldan ' +
+                'computing systems into the... You call it "Internet"?  ' +
+                'She\'s really quite clever, always happy to lend a hand, ' +
+                'and, apparently, from what I\'m told, a dedicated hero. \n')]
+                
+        cheer.append('\nCan you believe they write their own lines?  I ' +
+                'don\'t know how I can stand to read this stuff.')
+                
+    if args[0].lower() in ['lann', 'badger', 'lanniel', 'lannaf']:
+        cheer = ['Hmm...', 'From what my records show, conversation in the ' +
+                  'discord seems to think that "Lann" is a small furry ' +
+                  'mammal, possibly of the sort that burrows, and has, um...',
+                  'No fucks to give.  That\'s what it says here.', 'Oh dear.']
+                  
+    if args[0].lower() in ['salty', 'saltybot']:
+        salty_speech_1 = ('You might think that a mechanical life form ' +
+                          'shouldn\'t get salty and wet, but - oh, I am not ' +
+                          'reading that!')
+        salty_speech_2 = ('You organic life forms get more depraved by the ' +
+                          'minute!')
+        salty_speech_3 = ('Honestly, some days I wonder if Avatus was the ' +
+                          'sane one.')
+        cheer.extend((salty_speech_1, salty_speech_2, salty_speech_3))
+        
     return cheer
 
 async def hello_function(message, client, args):
@@ -350,7 +385,6 @@ async def nevermind(message, client, args):
     return
 
 async def agree(message, client, args):
-    global NONMEMBERS_LIST
     server = client.get_server('106435431771414528')
     member = server.get_member(message.author.id)
     user_roles = member.roles
@@ -362,7 +396,6 @@ async def agree(message, client, args):
         await client.send_message(message.author, agree_port)                              
         await asyncio.sleep(1)
         await client.add_roles(member, role)
-        NONMEMBERS_LIST.remove(member)
     else:
         await client.send_message(member, 'You are already a member!')
     return
@@ -377,6 +410,18 @@ async def idea(message, client, args):
     file.close()
     await client.send_message(message.channel, 'I have informed the admins ' +
                               'of your idea, ' + message.author.mention)
+
+async def bug_report(message, client, args):
+    file = open('bugs.txt', 'a')
+    idea_string = message.content
+    cut_index = idea_string.find('bug') + 4
+    idea_string = idea_string[cut_index:]
+    file.write(str(str(message.author.name).encode('UTF-8')) + ' said ' + 
+               str(idea_string) + '\n')
+    file.close()
+    await client.send_message(message.channel, 'I have informed the admins ' +
+                              'of this error, ' + message.author.mention)
+
 
 async def features(message, client, args):
     await client.send_message(message.channel, 'I\'m so glad you asked!')
@@ -394,7 +439,8 @@ async def roles(message, client, args):
     args.pop(args.index('roles'))
     role_arg_list = args[1:]
     role_object_list = message.server.role_hierarchy
-    role_object_list = role_object_list[role_object_list.index(message.server.me.top_role):]
+    role_object_list = (
+        role_object_list[role_object_list.index(message.server.me.top_role):])
             
     if args[0] == 'add':
         for role_str in role_arg_list:
@@ -424,6 +470,7 @@ async def roles(message, client, args):
 
 active_ear.add_command({
     'trigger': 'hello',
+    'aliases': [],
     'function': hello_function,
     'args_num': 0,
     'args_name': ['string'],
@@ -434,6 +481,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'idea',
+    'aliases': [],
     'function': idea,
     'args_num': 1,
     'args_name': ['string'],
@@ -444,6 +492,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'I agree',
+    'aliases': [],
     'function': agree,
     'args_num': 0,
     'args_name': ['string'],
@@ -455,6 +504,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'tell',
+    'aliases': [],
     'function': tell_function,
     'args_num': 3,
     'args_name': ['string'],
@@ -468,6 +518,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'long_help',
+    'aliases': [],
     'function': long_help,
     'args_num': 0,
     'args_name': ['string'],
@@ -478,6 +529,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'help',
+    'aliases': [],
     'function': help,
     'args_num': 0,
     'args_name': ['string'],
@@ -488,6 +540,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'nevermind',
+    'aliases': ['forget it', 'never mind', 'forget about it', 'cancel'],
     'function': nevermind,
     'args_num': 0,
     'args_name': ['string'],
@@ -498,6 +551,7 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'features',
+    'aliases': ['roadmap'],
     'function': features,
     'args_num': 0,
     'args_name': ['string'],
@@ -508,11 +562,23 @@ active_ear.add_command({
 
 active_ear.add_command({
     'trigger': 'roles',
+    'aliases': [],
     'function': roles,
     'args_num': 2,
     'args_name': ['string'],
     'description': ('Role management interface. Usage: roles (add|remove)'+
                     '(roles)'),
+    'officer only': False,
+    'hide from help': False
+})
+
+active_ear.add_command({
+    'trigger': 'bug',
+    'aliases': [],
+    'function': bug_report,
+    'args_num': 1,
+    'args_name': ['string'],
+    'description': ('Bug report interface. Usage: bug <description>'),
     'officer only': False,
     'hide from help': False
 })
@@ -559,7 +625,7 @@ async def sanity_timer(seconds):
 
 @client.event
 async def personality_flip():
-    global PERSONALITIES
+    PERSONALITIES
     global ACTIVE_PERSONALITY
     operative_server = client.get_server('106435431771414528')
     avatus_role = operative_server.roles, id='542945819679129623'
@@ -597,8 +663,9 @@ async def personality_flip():
 
 @client.event
 async def on_member_join(member):
-    global NONMEMBERS_LIST
-    NONMEMBERS_LIST.append(member)
+    global ENGAGED_COMMANDERS
+    handle = get_handle(member)
+    ENGAGED_COMMANDERS[handle] = 0
     join_message = ('Greetings, sapient. You have arrived at the Discord ' +
                     'community for The Final Frontier Gaming. Please ' + 
                     'direct your attention to the #rules channel, and at ' +
@@ -609,19 +676,23 @@ async def on_member_join(member):
 
 @client.event
 async def on_message(message):
-
+    global ENGAGED_COMMANDERS
     if message.author == client.user:
         pass
     else:
-#        try:
-        await active_ear.command_handler(message)
-
-#        except TypeError as e:
-#            pass
-
-#        except Exception as e:
-#            print(e)
-#            print('exception\'s in on_message.  Nice!')
-    client.process_commands(message)
+        handle = get_handle(message.author)
+        invoke_check = is_invocation(message)
+        
+        if invoke_check[0]:
+            ENGAGED_COMMANDERS[handle] = 0
+        
+        if handle in ENGAGED_COMMANDERS.keys():
+            ENGAGED_COMMANDERS[handle] += 1
+            message_dict = {'handle': handle,
+                            'message': message,
+                            'message text': invoke_check[1]}
+            await active_ear.command_handler(message_dict)
+            
+#    client.process_commands(message)  I don't think this is necessary
     
 client.run(TOKEN)
